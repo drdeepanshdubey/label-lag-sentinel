@@ -8,7 +8,7 @@ import importlib.util
 import pathlib
 import sys
 
-_path = pathlib.Path(__file__).resolve().parents[0] / "sentinel" / "signal.py"
+_path = pathlib.Path(__file__).resolve().parents[1] / "sentinel" / "signal.py"
 _spec = importlib.util.spec_from_file_location("pv_signal", _path)
 sig = importlib.util.module_from_spec(_spec)
 sys.modules[_spec.name] = sig
