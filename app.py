@@ -99,14 +99,24 @@ if res:
     if res.unlabeled_signals.empty:
         st.success("No unlabeled signals crossed the threshold — every detected signal "
                    "appears in the current label (or no label was found).")
+    elif "priority_score" not in res.unlabeled_signals.columns:
+        # Fallback for old cached sessions
+        st.warning("Please click 'Run signal analysis' again to generate the new Priority Scores.")
     else:
-        show = res.unlabeled_signals[["reaction", "a", "prr", "prr_low", "prr_high",
-                                      "ror", "chi2", "ic"]].rename(
-            columns={"a": "cases", "prr_low": "PRR low", "prr_high": "PRR high"})
-        st.dataframe(show, use_container_width=True, hide_index=True)
+        show = res.unlabeled_signals[["reaction", "priority_score", "evidence_rationale", "a", "prr", "chi2"]].rename(
+            columns={"a": "cases", "priority_score": "Priority Score", "evidence_rationale": "Evidence Rationale"})
+        st.dataframe(show, use_container_width=True, hide_index=True, column_config={
+            "Priority Score": st.column_config.ProgressColumn(
+                "Priority Score",
+                help="0-100 score based on FAERS statistical strength + PubMed case report corroboration",
+                format="%d",
+                min_value=0,
+                max_value=100,
+            )
+        })
         top_bar = res.unlabeled_signals.head(12)
-        bar = px.bar(top_bar, x="prr", y="reaction", orientation="h", color="chi2",
-                     color_continuous_scale="Reds", labels={"prr": "PRR", "reaction": ""})
+        bar = px.bar(top_bar, x="priority_score", y="reaction", orientation="h", color="pubmed_cases",
+                     color_continuous_scale="Reds", labels={"priority_score": "Priority Score", "reaction": "", "pubmed_cases": "Literature Cases"})
         bar.update_layout(yaxis={"categoryorder": "total ascending"})
         st.plotly_chart(bar, use_container_width=True)
 

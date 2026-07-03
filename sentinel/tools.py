@@ -171,3 +171,21 @@ def dailymed_label(s: Settings, name: str) -> dict:
             pass
     full = " ".join(sections.values())[:20000]
     return {"ok": True, "setid": setid, "title": title, "sections": sections, "full_text": full}
+
+
+# ----------------------------- PubMed E-utilities -----------------------------
+def pubmed_case_reports(s: Settings, drug: str, reaction: str) -> int:
+    """Fetch the number of published case reports for a drug + reaction."""
+    base = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+    # [tiab] searches Title and Abstract. [pt] filters by Publication Type.
+    query = f'"{drug}"[tiab] AND "{reaction}"[tiab] AND "case reports"[pt]'
+    
+    r = _get(base, {"db": "pubmed", "term": query, "retmode": "json"}, timeout=10.0)
+    if not r:
+        return 0
+    try:
+        data = r.json()
+        count = data.get("esearchresult", {}).get("count", 0)
+        return int(count)
+    except Exception:
+        return 0

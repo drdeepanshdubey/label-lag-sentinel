@@ -93,6 +93,52 @@ class Coordinator:
         signals_df["labeled"] = signals_df["reaction"].apply(is_labeled)
         return signals_df
 
+    def prioritize(self, drug: str, unlabeled_df: pd.DataFrame) -> pd.DataFrame:
+        if unlabeled_df.empty:
+            unlabeled_df = unlabeled_df.copy()
+            unlabeled_df["priority_score"] = pd.Series(dtype=int)
+            unlabeled_df["pubmed_cases"] = pd.Series(dtype=int)
+            unlabeled_df["evidence_rationale"] = pd.Series(dtype=str)
+            return unlabeled_df
+            
+        self.log("Literature Agent: cross-referencing signals with PubMed case reports...")
+        
+        scores = []
+        cases = []
+        rationales = []
+        
+        for _, row in unlabeled_df.iterrows():
+            reaction = row["reaction"]
+            chi2 = row["chi2"]
+            
+            n_cases = tools.pubmed_case_reports(self.s, drug, reaction)
+            cases.append(n_cases)
+            
+            stat_score = min(50, int((chi2 / 20.0) * 50))
+            if n_cases == 0:
+                lit_score = 0
+            elif n_cases == 1:
+                lit_score = 20
+            elif n_cases == 2:
+                lit_score = 35
+            else:
+                lit_score = 50
+                
+            total_score = stat_score + lit_score
+            scores.append(total_score)
+            
+            rationale = f"Score {total_score}: Stat Signal (Chi2={chi2:.1f})"
+            if n_cases > 0:
+                rationale += f" + {n_cases} PubMed Case Report{'s' if n_cases > 1 else ''}"
+            else:
+                rationale += " (No published case reports found)"
+            rationales.append(rationale)
+            
+        unlabeled_df["priority_score"] = scores
+        unlabeled_df["pubmed_cases"] = cases
+        unlabeled_df["evidence_rationale"] = rationales
+        return unlabeled_df.sort_values("priority_score", ascending=False).reset_index(drop=True)
+
     def assess(self, drug: str, unlabeled_df: pd.DataFrame) -> str:
         if self.llm is None:
             return "_LLM causality assessment skipped — no OpenRouter API key provided._"
@@ -100,12 +146,13 @@ class Coordinator:
             return ("No unlabeled disproportionality signals met the threshold for this drug in the "
                     "current FAERS snapshot.")
         self.log("Causality Assessor: LLM applying WHO-UMC + Bradford Hill...")
-        top = unlabeled_df.head(10)[["reaction", "a", "prr", "prr_low", "ror", "chi2", "ic"]]
+        top = unlabeled_df.head(10)[["reaction", "a", "prr", "chi2", "priority_score", "pubmed_cases"]]
         table = top.to_string(index=False)
         user = (
             f"Drug: {drug}\n\n"
             "These adverse-event terms show statistical disproportionality in FAERS AND are NOT found "
-            "in the drug's current DailyMed label (potential label-gap signals):\n\n"
+            "in the drug's current DailyMed label (potential label-gap signals). They have been scored "
+            "based on statistical strength and PubMed case report corroboration:\n\n"
             f"{table}\n\n"
             "For the up-to-5 highest-priority terms, provide: (1) a one-line plain-language "
             "interpretation; (2) the WHO-UMC category you would PROVISIONALLY assign given ONLY this "
@@ -146,8 +193,12 @@ class Coordinator:
         if not signals.empty:
             signals = signals.sort_values(["is_signal", "prr"], ascending=[False, False]).reset_index(drop=True)
             unlabeled = signals[(signals["is_signal"]) & (~signals["labeled"])].reset_index(drop=True)
+            unlabeled = self.prioritize(profile["drug"], unlabeled)
         else:
-            unlabeled = signals
+            unlabeled = signals.copy() if not signals.empty else pd.DataFrame(columns=signals.columns)
+            unlabeled["priority_score"] = pd.Series(dtype=int)
+            unlabeled["pubmed_cases"] = pd.Series(dtype=int)
+            unlabeled["evidence_rationale"] = pd.Series(dtype=str)
         narrative = self.assess(profile["drug"], unlabeled)
         return SentinelResult(
             drug_query=drug, resolved_drug=profile["drug"], n_drug=profile["n_drug"],
